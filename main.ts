@@ -1,6 +1,5 @@
 async function handler(req: Request): Promise<Response> {
   const TARGET_DOMAIN = Deno.env.get("TARGET_DOMAIN");
-  
   if (!TARGET_DOMAIN) {
     return new Response("TARGET_DOMAIN not set", { status: 500 });
   }
@@ -9,21 +8,37 @@ async function handler(req: Request): Promise<Response> {
   const targetUrl = TARGET_DOMAIN + url.pathname + url.search;
 
   const headers = new Headers(req.headers);
+
+  // حذف hop-by-hop headers
   headers.delete("host");
-  headers.delete("x-forwarded-host");
-  headers.delete("x-forwarded-proto");
+  headers.delete("connection");
+  headers.delete("keep-alive");
+  headers.delete("proxy-authenticate");
+  headers.delete("proxy-authorization");
+  headers.delete("te");
+  headers.delete("trailers");
+  headers.delete("transfer-encoding");
+  headers.delete("upgrade");
+
+  // مهم: preserve client IP
+  const clientIp = req.headers.get("x-forwarded-for");
+  if (clientIp) {
+    headers.set("x-forwarded-for", clientIp);
+  }
 
   try {
-    const response = await fetch(targetUrl, {
+    const upstream = await fetch(targetUrl, {
       method: req.method,
-      headers: headers,
+      headers,
       body: req.body,
+      redirect: "manual",
+      // مهم برای streaming
       duplex: "half",
-      redirect: "manual"
     });
-    return response;
-  } catch (error) {
-    return new Response(`Relay error: ${error.message}`, { status: 502 });
+
+    return upstream;
+  } catch (e) {
+    return new Response("Relay error: " + e.message, { status: 502 });
   }
 }
 
